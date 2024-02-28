@@ -1,0 +1,15 @@
+from nucoin import NucoinWallet, BTC_BRL, NCN_BRL
+# 14 de Junho xD
+w = NucoinWallet(75.00)
+w.freeze(50.00)
+w.freeze(25.00)
+w.reward(spent=60.00)
+w.buy(BRL=39.00,NCN=3000.00)
+w.freeze(1000.00)
+w.freeze(2000.00)
+w.buy_crypto(BRL=90.00,amount=.0003,name='BTC')
+w.sell(BRL=5.90, NCN=64.96)
+w.melt(3075.00)
+w.sell_crypto(BRL=100.00, amount=  .0003, name='BTC')
+w.sell(NCN=w.available["NCN"].value, BRL=w.available["NCN"].convert_to("BRL").value)
+print(w)
