@@ -1,9 +1,26 @@
 import sys
+import json
 import requests
+import datetime
+def request_new_data():
+    now = datetime.datetime.now()
+    try:
+        price_history = json.load(open('price_history.json'))
+    except FileNotFoundError:
+        price_history = None
+    if not price_history or now.minutes in [12 + n*15 for n in range(5)]:
+        r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
+        if r.ok:
+            price_history = r.json()
+            json.dump(price_history, open('price_history.json','w'))
+    return price_history
 
-r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
-price_history = r.json()
+try:
+    price_history = json.load(open('price_history.json'))
+except FileNotFoundError:
+    price_history = request_new_data()
 NCN_BRL = price_history['latest']
+
 
 r = requests.get("http://economia.awesomeapi.com.br/json/last/BTC-BRL")
 price_btc = r.json()
@@ -111,7 +128,7 @@ class Monetary:
         return self.amount < other.amount
 
     def __le__(self, other):
-        return self.amount < other.amount
+        return self.amount <= other.amount
 
 
 class Asset:
@@ -137,7 +154,7 @@ class Asset:
 
 
 class NucoinWallet:
-    def __init__(self, initial):
+    def __init__(self, initial=0.00):
         ZERO_BRL = Monetary(0,'BRL')
         ZERO_NCN = Monetary(0,'NCN')
         self.frozen       = ZERO_NCN
@@ -151,6 +168,7 @@ class NucoinWallet:
             self.mean_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
             self.sell_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
             self.available[k] = Monetary(0,k)
+        self.available["NCN"] += Monetary(float(initial),'NCN')
 
     @property
     def level(self):
@@ -183,11 +201,11 @@ class NucoinWallet:
         return 0.00
 
     def adjust(self, NCN):
-        NCN = Monetary(NCN,'NCN')
+        NCN = Monetary(float(NCN),'NCN')
         self.available['NCN'] -= NCN
 
     def airdrop(self, NCN):
-        NCN = Monetary(NCN,'NCN')
+        NCN = Monetary(float(NCN),'NCN')
         self.available['NCN'] += NCN
 
     def reward(self, spent, NCN=None, by_crypto=False):
@@ -198,8 +216,8 @@ class NucoinWallet:
         print(f'{color.REWARD}REWARD:{color.ENDC} {REWARD} from {Monetary(spent,"BRL")} spent.')
 
     def freeze(self, amount):
-        print(self.frozen)
-        amount = Monetary(amount,'NCN')
+        amount = Monetary(float(amount),'NCN')
+        #if amount > self.available["NCN"]: raise ValueError(amount.value -self.available["NCN"].value)
         self.available['NCN'] -= amount
         old_level = self.level
         self.frozen += amount
@@ -209,7 +227,8 @@ class NucoinWallet:
             print(color.LEVEL_UP + msg + color.ENDC)
 
     def melt(self, amount):
-        amount = Monetary(amount,'NCN')
+        amount = Monetary(float(amount),'NCN')
+        #if amount > self.available["NCN"]: raise ValueError(amount.value -self.available["NCN"].value)
         old_level = self.level
         self.frozen -= amount
         self.available['NCN'] += amount
@@ -219,8 +238,8 @@ class NucoinWallet:
             print(color.LEVEL_UP + msg + color.ENDC)
 
     def buy_crypto(self, BRL, amount, name):
-        BRL    = Monetary(BRL,'BRL')
-        amount = Monetary(amount,name)
+        BRL    = Monetary(float(BRL),'BRL')
+        amount = Monetary(float(amount),name)
         self.available['BRL']-= BRL
         self.available[name] += amount
         crypto = Asset(BRL,amount)
@@ -230,16 +249,17 @@ class NucoinWallet:
         self.reward(BRL.value,by_crypto=True)
 
     def buy(self, BRL, NCN):
-        BRL = Monetary(BRL,'BRL')
-        NCN = Monetary(NCN,'NCN')
-        self.available['BRL'] += BRL
+        BRL = Monetary(float(BRL),'BRL')
+        NCN = Monetary(float(NCN),'NCN')
+        self.available['BRL'] -= BRL
         self.available['NCN'] += NCN
         self.mean_price['NCN'] += Asset(BRL,NCN)
         print(f'{color.BUY}BUY:{color.ENDC}    {Asset(BRL,NCN)}')
 
     def sell_crypto(self, BRL, amount, name):
-        BRL = Monetary(BRL,'BRL')
-        amount = Monetary(amount,name)
+        BRL = Monetary(float(BRL),'BRL')
+        amount = Monetary(float(amount),name)
+        #if Monetary(0,name) < amount > self.available[name]: raise ValueError(amount.value -self.available[name].value)
         self.available["BRL"] += BRL
         self.available[name] -= amount
         crypto = Asset(BRL,amount)
@@ -247,21 +267,15 @@ class NucoinWallet:
         print(f'{color.SELL+color.UNDERLINE}SELL (BTC):{color.ENDC}   {crypto}')
 
     def sell(self, BRL, NCN):
-        BRL = Monetary(BRL,'BRL')
-        NCN = Monetary(NCN,'NCN')
+        BRL = Monetary(float(BRL),'BRL')
+        NCN = Monetary(float(NCN),'NCN')
+        #if Monetary(0,'NCN') < NCN > self.available["NCN"]: raise ValueError(NCN.value -self.available["NCN"].value)
         self.available["BRL"] += BRL
         self.available['NCN'] -= NCN
         self.sell_price['NCN'] += Asset(BRL,NCN)
         print(f'{color.SELL}SELL:{color.ENDC}   {Asset(BRL,NCN)}')
 
     def __str__(self):
-        TOTAL_BALANCE = self.available["BRL"] \
-                      + self.frozen.convert_to('BRL') \
-                      + self.available['NCN'].convert_to('BRL') \
-                      + self.available['BTC'].convert_to('BRL')
-        LIQUID = self.available["BRL"]
-        for k, v in self.available.items():
-            LIQUID += self.available[k].convert_to("BRL")
         REWARD_NCN = GASTOS * self.reward_rate
         ret = 48*"#" + '\n'
         ret += f'CURRENT WALLET LEVEL {self.level}\n'
@@ -274,20 +288,25 @@ class NucoinWallet:
         ret += f'NCN: R$ {6*REWARD_NCN*NCN_BRL:.2f} a.s.\n'
         ret += f'**{self.next_level} are needed for next level (R$ {self.next_level.convert_to("BRL")})**\n'
         ret += f'FROZEN:    {self.frozen} = {self.frozen.convert_to("BRL")}\n'
-        ret += f'AVAILABLE: {self.available["NCN"]}  = {self.available["NCN"].convert_to("BRL")}\n'
-        ret += f'BANK:      {self.available["BRL"]}\n'
+        LIQUID = self.available["BRL"]
+        for k, v in self.available.items():
+            LIQUID += self.available[k].convert_to("BRL")
         ret += f'LIQUID:    {LIQUID}\n'
         ret += f'REWARDS:   {self.rewards}\n'
         ret += f'CC CARD:   {self.cc_spent}\n'
-        ret += f'BALANCE:   {TOTAL_BALANCE}\n'
         ret += 48*"-" + '\n'
+        TOTAL_VALUE = Monetary(0,'BRL')
         for k, v in ASSETS_INFO.items():
             profit = self.sell_price[k] - self.mean_price[k]
+            brl_equivalece = self.available[k].convert_to("BRL")
+            ret += f'AVAILABLE  {k}: {self.available[k]} = {brl_equivalece}\n'
             ret += f'SELL PRICE {k}: {self.sell_price[k]}\n'
             ret += f'MEAN PRICE {k}: {self.mean_price[k]}\n'
             ret += f'PROFIT     {k}: {profit}\n'
             ret += 48*"-" + '\n'
+            TOTAL_VALUE += brl_equivalece
         ret += 48*"#" + '\n'
+        ret += f'TOTAL_VALUE: {TOTAL_VALUE}'
         return ret
 
 if __name__ == '__main__':
