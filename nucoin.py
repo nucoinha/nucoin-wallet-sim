@@ -8,7 +8,6 @@ def request_new_data():
         price_history = json.load(open('price_history.json'))
     except FileNotFoundError:
         price_history = None
-    if not price_history or now.minutes in [12 + n*15 for n in range(5)]:
         r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
         if r.ok:
             price_history = r.json()
@@ -63,11 +62,10 @@ ASSETS_INFO = {
     'BTC':   {'precision': 8, 'symbol': 'BTC'  , 'price': BTC_BRL },
     'MATIC': {'precision': 8, 'symbol': 'MATIC', 'price': 0.0     },
     'BRL':   {'precision': 2, 'symbol': 'BRL'  , 'price': 1.0     },
-    'TKN':   {'precision': 0, 'symbol': 'TKN'  , 'price': 0.0     },
 }
 
 class Monetary:
-    def __init__(self, value, symbol='TKN'):
+    def __init__(self, value, symbol='BRL'):
         precision = ASSETS_INFO[symbol]['precision']
         self.amount = value
         if isinstance(value, float):
@@ -159,14 +157,16 @@ class NucoinWallet:
         ZERO_NCN = Monetary(0,'NCN')
         self.frozen       = ZERO_NCN
         self.rewards      = ZERO_NCN
-        self.cc_spent     = ZERO_BRL
+        self.spent = {}
         self.mean_price = {}
         self.sell_price = {}
         self.available  = {}
+        self.spent['CC'] = ZERO_BRL # CREDIT CARD
         for k, v in ASSETS_INFO.items():
             ZERO_CRYPTO = Monetary(0,k)
             self.mean_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
             self.sell_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
+            if not k == "BRL": self.spent[k] = ZERO_BRL
             self.available[k] = Monetary(0,k)
         self.available["NCN"] += Monetary(float(initial),'NCN')
 
@@ -208,11 +208,11 @@ class NucoinWallet:
         NCN = Monetary(float(NCN),'NCN')
         self.available['NCN'] += NCN
 
-    def reward(self, spent, NCN=None, by_crypto=False):
+    def reward(self, spent, NCN=None, origin="CC"):
         REWARD = Monetary(spent * self.reward_rate if not NCN else NCN,'NCN')
         self.available['NCN'] += REWARD
         self.rewards += REWARD
-        if not by_crypto: self.cc_spent += Monetary(spent,'BRL')
+        self.spent[origin] += Monetary(spent, "BRL")
         print(f'{color.REWARD}REWARD:{color.ENDC} {REWARD} from {Monetary(spent,"BRL")} spent.')
 
     def freeze(self, amount):
@@ -246,7 +246,7 @@ class NucoinWallet:
         self.mean_price[name] += crypto
         print(f'{color.BUY+color.UNDERLINE}({name}) BUY:{color.ENDC}    {crypto}')
         print(f'{color.REWARD+color.UNDERLINE}({name}) ',end='')
-        self.reward(BRL.value,by_crypto=True)
+        self.reward(BRL.value,origin=name)
 
     def buy(self, BRL, NCN):
         BRL = Monetary(float(BRL),'BRL')
@@ -254,6 +254,7 @@ class NucoinWallet:
         self.available['BRL'] -= BRL
         self.available['NCN'] += NCN
         self.mean_price['NCN'] += Asset(BRL,NCN)
+        self.spent['NCN'] += BRL
         print(f'{color.BUY}BUY:{color.ENDC}    {Asset(BRL,NCN)}')
 
     def sell_crypto(self, BRL, amount, name):
@@ -282,29 +283,28 @@ class NucoinWallet:
         ret += f'1 NCN = R$ {NCN_BRL:.8f}\n'
         ret += f'1 BTC = R$ {BTC_BRL:.2f}\n'
         ret += 48*"#" + '\n'
-        ret += f'R$ {self.reward_rate*NCN_BRL:.2f} per R$ 1 ({self.reward_rate*NCN_BRL*100:.2f}% cashback)\n'
-        ret += f'R$ {GASTOS:.2f} gives {REWARD_NCN:.2f} NCN (R$ {REWARD_NCN * NCN_BRL:.2f}) Retorno: {profit_percent(GASTOS,GASTOS+REWARD_NCN*NCN_BRL):.2f}% a.m\n'
-        ret += f'CDI: R$ {self.frozen * NCN_BRL * SELIC_TAX} a.a.\n'
-        ret += f'NCN: R$ {6*REWARD_NCN*NCN_BRL:.2f} a.s.\n'
-        ret += f'**{self.next_level} are needed for next level (R$ {self.next_level.convert_to("BRL")})**\n'
+        ret += f'{color.BOLD}NEXT LEVEL: {self.next_level} = {self.next_level.convert_to("BRL")}{color.ENDC}\n'
         ret += f'FROZEN:    {self.frozen} = {self.frozen.convert_to("BRL")}\n'
-        LIQUID = self.available["BRL"]
-        for k, v in self.available.items():
-            LIQUID += self.available[k].convert_to("BRL")
-        ret += f'LIQUID:    {LIQUID}\n'
         ret += f'REWARDS:   {self.rewards}\n'
-        ret += f'CC CARD:   {self.cc_spent}\n'
+        ret += 48*"-" + '\n'
+        for k, v in self.spent.items():
+            ret += f'SPENT WITH {k}: {self.spent[k]}\n'
         ret += 48*"-" + '\n'
         TOTAL_VALUE = Monetary(0,'BRL')
-        for k, v in ASSETS_INFO.items():
-            profit = self.sell_price[k] - self.mean_price[k]
+        LIQUID = self.available["BRL"]
+        for k, v in self.available.items():
             brl_equivalece = self.available[k].convert_to("BRL")
+            TOTAL_VALUE += brl_equivalece 
             ret += f'AVAILABLE  {k}: {self.available[k]} = {brl_equivalece}\n'
+        ret += 48*"-" + '\n'
+        TOTAL_VALUE += self.frozen.convert_to('BRL')
+        for k, v in ASSETS_INFO.items():
+            profit = (self.sell_price[k] - self.mean_price[k]).fiduciary
+            if k in ['BRL']: continue
             ret += f'SELL PRICE {k}: {self.sell_price[k]}\n'
             ret += f'MEAN PRICE {k}: {self.mean_price[k]}\n'
             ret += f'PROFIT     {k}: {profit}\n'
             ret += 48*"-" + '\n'
-            TOTAL_VALUE += brl_equivalece
         ret += 48*"#" + '\n'
         ret += f'TOTAL_VALUE: {TOTAL_VALUE}'
         return ret
