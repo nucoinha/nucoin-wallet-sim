@@ -3,7 +3,6 @@ import json
 import requests
 import datetime
 def request_new_data():
-    now = datetime.datetime.now()
     try:
         price_history = json.load(open('price_history.json'))
     except FileNotFoundError:
@@ -14,22 +13,14 @@ def request_new_data():
             json.dump(price_history, open('price_history.json','w'))
     return price_history
 
-try:
-    price_history = json.load(open('price_history.json'))
-except FileNotFoundError:
-    price_history = request_new_data()
+price_history = request_new_data()
 NCN_BRL = price_history['latest']
-
 
 r = requests.get("http://economia.awesomeapi.com.br/json/last/BTC-BRL")
 price_btc = r.json()
 btc_hi = int(price_btc['BTCBRL']['high'])
 btc_lo = int(price_btc['BTCBRL']['low'])
 BTC_BRL = (btc_hi + btc_lo) / 2
-
-SELIC_TAX = 0.97 / 100 # a.m.
-
-GASTOS = 2100.00
 
 if len(sys.argv) > 1:
     read = float(sys.argv[1])
@@ -56,6 +47,17 @@ class color:
     UNDERLINE = '\033[4m'
     NEGATIVE = SELL + BOLD
     POSITIVE = BUY  + BOLD
+
+def make_title(text, c=color.BOLD, length=48, fill="-"):
+    fill_len = (length - len(text) - 2)
+    fill_r = fill * (fill_len // 2)
+    fill_l = fill * (fill_len - fill_len // 2)
+    ret = c
+    ret += length*fill + '\n'
+    ret += f'{fill_l} {text} {fill_r}\n'
+    ret += length*fill + '\n'
+    ret += color.ENDC
+    return ret
 
 ASSETS_INFO = {
     'NCN':   {'precision': 2, 'symbol': 'NCN'  , 'price': NCN_BRL },
@@ -155,19 +157,22 @@ class NucoinWallet:
     def __init__(self, initial=0.00):
         ZERO_BRL = Monetary(0,'BRL')
         ZERO_NCN = Monetary(0,'NCN')
-        self.frozen       = ZERO_NCN
-        self.rewards      = ZERO_NCN
+        self.frozen = ZERO_NCN
+        self.rewards = {}
         self.spent = {}
         self.mean_price = {}
         self.sell_price = {}
         self.available  = {}
         self.spent['CC'] = ZERO_BRL # CREDIT CARD
+        self.rewards['CC'] = ZERO_NCN # CREDIT CARD
         for k, v in ASSETS_INFO.items():
-            ZERO_CRYPTO = Monetary(0,k)
-            self.mean_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
-            self.sell_price[k] = Asset(ZERO_BRL,ZERO_CRYPTO)
-            if not k == "BRL": self.spent[k] = ZERO_BRL
-            self.available[k] = Monetary(0,k)
+            ZERO = Monetary(0,k)
+            self.available[k] = ZERO
+            if k == "BRL": continue
+            self.spent[k] = ZERO_BRL
+            self.rewards[k] = ZERO_NCN
+            self.mean_price[k] = Asset(ZERO_BRL,ZERO)
+            self.sell_price[k] = Asset(ZERO_BRL,ZERO)
         self.available["NCN"] += Monetary(float(initial),'NCN')
 
     @property
@@ -211,13 +216,12 @@ class NucoinWallet:
     def reward(self, spent, NCN=None, origin="CC"):
         REWARD = Monetary(spent * self.reward_rate if not NCN else NCN,'NCN')
         self.available['NCN'] += REWARD
-        self.rewards += REWARD
+        self.rewards[origin] += REWARD
         self.spent[origin] += Monetary(spent, "BRL")
         print(f'{color.REWARD}REWARD:{color.ENDC} {REWARD} from {Monetary(spent,"BRL")} spent.')
 
     def freeze(self, amount):
         amount = Monetary(float(amount),'NCN')
-        #if amount > self.available["NCN"]: raise ValueError(amount.value -self.available["NCN"].value)
         self.available['NCN'] -= amount
         old_level = self.level
         self.frozen += amount
@@ -228,7 +232,6 @@ class NucoinWallet:
 
     def melt(self, amount):
         amount = Monetary(float(amount),'NCN')
-        #if amount > self.available["NCN"]: raise ValueError(amount.value -self.available["NCN"].value)
         old_level = self.level
         self.frozen -= amount
         self.available['NCN'] += amount
@@ -260,7 +263,6 @@ class NucoinWallet:
     def sell_crypto(self, BRL, amount, name):
         BRL = Monetary(float(BRL),'BRL')
         amount = Monetary(float(amount),name)
-        #if Monetary(0,name) < amount > self.available[name]: raise ValueError(amount.value -self.available[name].value)
         self.available["BRL"] += BRL
         self.available[name] -= amount
         crypto = Asset(BRL,amount)
@@ -270,43 +272,60 @@ class NucoinWallet:
     def sell(self, BRL, NCN):
         BRL = Monetary(float(BRL),'BRL')
         NCN = Monetary(float(NCN),'NCN')
-        #if Monetary(0,'NCN') < NCN > self.available["NCN"]: raise ValueError(NCN.value -self.available["NCN"].value)
         self.available["BRL"] += BRL
         self.available['NCN'] -= NCN
         self.sell_price['NCN'] += Asset(BRL,NCN)
         print(f'{color.SELL}SELL:{color.ENDC}   {Asset(BRL,NCN)}')
 
     def __str__(self):
-        REWARD_NCN = GASTOS * self.reward_rate
-        ret = 48*"#" + '\n'
-        ret += f'CURRENT WALLET LEVEL {self.level}\n'
+        ret = make_title('WALLET SNAPSHOT',color.BOLD)
         ret += f'1 NCN = R$ {NCN_BRL:.8f}\n'
         ret += f'1 BTC = R$ {BTC_BRL:.2f}\n'
-        ret += 48*"#" + '\n'
+        ret += f'{color.BOLD}CURRENT LEVEL: {self.level}{color.ENDC}\n'
         ret += f'{color.BOLD}NEXT LEVEL: {self.next_level} = {self.next_level.convert_to("BRL")}{color.ENDC}\n'
-        ret += f'FROZEN:    {self.frozen} = {self.frozen.convert_to("BRL")}\n'
-        ret += f'REWARDS:   {self.rewards}\n'
-        ret += 48*"-" + '\n'
+        ret += make_title("REWARDS",color.REWARD)
+        TOTAL_SPENT = Monetary(0,"BRL")
+        TOTAL_REWARD = Monetary(0,"NCN")
         for k, v in self.spent.items():
-            ret += f'SPENT WITH {k}: {self.spent[k]}\n'
+            spent = self.spent[k]
+            reward = self.rewards[k]
+            TOTAL_SPENT += spent
+            TOTAL_REWARD += reward
+            percent = reward.amount / spent.amount * 100 if spent.amount else 0
+            ret += f'{k}: {spent} and got {reward} ({percent:.2f}%)\n'
         ret += 48*"-" + '\n'
-        TOTAL_VALUE = Monetary(0,'BRL')
-        LIQUID = self.available["BRL"]
+        percent = TOTAL_REWARD.amount / TOTAL_SPENT.amount * 100 if TOTAL_SPENT.amount else 0
+        ret += f'In total you spent {TOTAL_SPENT} and got {TOTAL_REWARD} ({percent:.2f}%).\n'
+        ret += make_title("LIQUID",color.REWARD)
+        TOTAL_LIQUID = Monetary(0,'BRL')
         for k, v in self.available.items():
             brl_equivalece = self.available[k].convert_to("BRL")
-            TOTAL_VALUE += brl_equivalece 
-            ret += f'AVAILABLE  {k}: {self.available[k]} = {brl_equivalece}\n'
+            TOTAL_LIQUID += brl_equivalece
+            ret += f'{k}: {self.available[k]} = {brl_equivalece}\n'
         ret += 48*"-" + '\n'
-        TOTAL_VALUE += self.frozen.convert_to('BRL')
+        TOTAL_FROZEN = self.frozen.convert_to("BRL")
+        ret += f'In total you have liquid {TOTAL_LIQUID} and {TOTAL_FROZEN} frozen.\n'
+        ret += 48*"-" + '\n'
+        TOTAL_PROFIT = Monetary(0,'BRL')
         for k, v in ASSETS_INFO.items():
-            profit = (self.sell_price[k] - self.mean_price[k]).fiduciary
             if k in ['BRL']: continue
-            ret += f'SELL PRICE {k}: {self.sell_price[k]}\n'
+            profit = (self.sell_price[k] - self.mean_price[k]).fiduciary
+            if profit.amount == 0: continue
+            if self.sell_price[k].fiduciary.amount == 0: continue
             ret += f'MEAN PRICE {k}: {self.mean_price[k]}\n'
-            ret += f'PROFIT     {k}: {profit}\n'
+            ret += f'SELL PRICE {k}: {self.sell_price[k]}\n'
             ret += 48*"-" + '\n'
-        ret += 48*"#" + '\n'
-        ret += f'TOTAL_VALUE: {TOTAL_VALUE}'
+            if profit.amount > 0:
+                ret += f'{color.POSITIVE}PROFIT {k}: {profit}{color.ENDC}\n'
+            elif profit.amount < 0:
+                ret += f'{color.NEGATIVE}LOSS {k}: {profit}{color.ENDC}\n'
+            ret += 48*"-"+ '\n'
+            TOTAL_PROFIT += profit
+        ret += f'TOTAL_PROFIT: {TOTAL_PROFIT}\n'
+        ret += 48*"-" + '\n'
+        WALLET_WORTH = TOTAL_LIQUID + self.frozen.convert_to("BRL")
+        ret += f'WALLET WORTH: {WALLET_WORTH}\n'
+        ret += 48*"-" + '\n'
         return ret
 
 if __name__ == '__main__':
