@@ -2,15 +2,12 @@ import sys
 import json
 import requests
 import datetime
+
 def request_new_data():
-    try:
-        price_history = json.load(open('price_history.json'))
-    except FileNotFoundError:
-        price_history = None
-        r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
-        if r.ok:
-            price_history = r.json()
-            json.dump(price_history, open('price_history.json','w'))
+    r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
+    if r.ok:
+        price_history = r.json()
+        json.dump(price_history, open('price_history.json','w'))
     return price_history
 
 price_history = request_new_data()
@@ -272,7 +269,7 @@ class NucoinWallet:
         self.mean_price[name] += crypto
         print(f'{color.BUY+color.UNDERLINE}({name}) BUY:{color.ENDC}    {crypto}')
         print(f'{color.REWARD+color.UNDERLINE}({name}) ',end='')
-        self.reward(BRL.value,origin=name)
+        self.reward(BRL.value,origin=name,date=date)
         # ["Date", "Operation", "Coin", "Fraction", "Value"]
         values = [ date, "BUY", name, amount.numeric, BRL.numeric ]
         self.file.write(','.join(map(str,values))+'\n')
@@ -356,9 +353,9 @@ class NucoinWallet:
                 ret += f'{color.POSITIVE}REALIZED PROFIT {k}: {profit}{color.ENDC}\n'
             elif profit.amount < 0:
                 ret += f'{color.NEGATIVE}REALIZED LOSS   {k}: {profit}{color.ENDC}\n'
-            if profit_plus.amount > 0:
+            if profit_plus.amount != profit.amount and profit_plus.amount > 0:
                 ret += f'{color.POSITIVE}UNREALIZED PROFIT {k}: {profit_plus}{color.ENDC}\n'
-            elif profit_plus.amount < 0:
+            if profit_plus.amount != profit.amount and profit_plus.amount < 0:
                 ret += f'{color.NEGATIVE}UNREALIZED LOSS   {k}: {profit_plus}{color.ENDC}\n'
             ret += 48*"-"+ '\n'
             TOTAL_REALIZED_PROFIT += profit
