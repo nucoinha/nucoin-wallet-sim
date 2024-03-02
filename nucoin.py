@@ -310,15 +310,20 @@ class NucoinWallet:
         for k, v in ASSETS_INFO.items():
             if k in ['BRL']: continue
             profit = (self.sell_price[k] - self.mean_price[k]).fiduciary
+            profit_plus = profit + self.available[k].convert_to("BRL")
             if profit.amount == 0: continue
             if self.sell_price[k].fiduciary.amount == 0: continue
             ret += f'MEAN PRICE {k}: {self.mean_price[k]}\n'
             ret += f'SELL PRICE {k}: {self.sell_price[k]}\n'
             ret += 48*"-" + '\n'
             if profit.amount > 0:
-                ret += f'{color.POSITIVE}PROFIT {k}: {profit}{color.ENDC}\n'
+                ret += f'{color.POSITIVE}LIQUIDATED PROFIT {k}: {profit}{color.ENDC}\n'
             elif profit.amount < 0:
-                ret += f'{color.NEGATIVE}LOSS {k}: {profit}{color.ENDC}\n'
+                ret += f'{color.NEGATIVE}LIQUIDATED LOSS   {k}: {profit}{color.ENDC}\n'
+            if profit_plus.amount > 0:
+                ret += f'{color.POSITIVE}CURRENT PROFIT {k}: {profit_plus}{color.ENDC}\n'
+            elif profit_plus.amount < 0:
+                ret += f'{color.NEGATIVE}CURRENT LOSS   {k}: {profit_plus}{color.ENDC}\n'
             ret += 48*"-"+ '\n'
             TOTAL_PROFIT += profit
         ret += f'TOTAL_PROFIT: {TOTAL_PROFIT}\n'
