@@ -307,6 +307,7 @@ class NucoinWallet:
         ret += f'In total you have liquid {TOTAL_LIQUID} and {TOTAL_FROZEN} frozen.\n'
         ret += 48*"-" + '\n'
         TOTAL_PROFIT = Monetary(0,'BRL')
+        TOTAL_LIQUIDATED_PROFIT = Monetary(0,'BRL')
         for k, v in ASSETS_INFO.items():
             if k in ['BRL']: continue
             profit = (self.sell_price[k] - self.mean_price[k]).fiduciary
@@ -325,8 +326,10 @@ class NucoinWallet:
             elif profit_plus.amount < 0:
                 ret += f'{color.NEGATIVE}CURRENT LOSS   {k}: {profit_plus}{color.ENDC}\n'
             ret += 48*"-"+ '\n'
-            TOTAL_PROFIT += profit
-        ret += f'TOTAL_PROFIT: {TOTAL_PROFIT}\n'
+            TOTAL_LIQUIDATED_PROFIT += profit
+            TOTAL_PROFIT += profit_plus
+        ret += f'TOTAL LIQUIDATED PROFIT: {TOTAL_LIQUIDATED_PROFIT}\n'
+        ret += f'TOTAL CURRENT PROFIT:    {TOTAL_PROFIT}\n'
         ret += 48*"-" + '\n'
         WALLET_WORTH = TOTAL_LIQUID + self.frozen.convert_to("BRL")
         ret += f'WALLET WORTH: {WALLET_WORTH}\n'
