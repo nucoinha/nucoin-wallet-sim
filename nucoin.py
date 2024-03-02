@@ -1,36 +1,17 @@
 import sys
-import json
-import requests
 import datetime
 
-def request_new_data():
-    r = requests.get("https://explorer.nucoin.com.br/files/blockchain/price_history.json")
-    if r.ok:
-        price_history = r.json()
-        json.dump(price_history, open('price_history.json','w'))
-    return price_history
-
-price_history = request_new_data()
-NCN_BRL = price_history['latest']
-
-r = requests.get("http://economia.awesomeapi.com.br/json/last/BTC-BRL")
-price_btc = r.json()
-btc_hi = float(price_btc['BTCBRL']['high'])
-btc_lo = float(price_btc['BTCBRL']['low'])
-BTC_BRL = (btc_hi + btc_lo) / 2
-
-r = requests.get("http://economia.awesomeapi.com.br/json/last/ETH-BRL")
-price_btc = r.json()
-ETH_hi = float(price_btc['ETHBRL']['high'])
-ETH_lo = float(price_btc['ETHBRL']['low'])
-ETH_BRL = (ETH_hi + ETH_lo) / 2
-
-if len(sys.argv) > 1:
-    read = float(sys.argv[1])
-    NCN_BRL = read if read > 0 else NCN_BRL
-if len(sys.argv) > 2:
-    read = float(sys.argv[2])
-    BTC_BRL = read if read > 0 else BTC_BRL
+try:
+    from fetch_online import fetch_eth, fetch_btc, fetch_ncn 
+    NCN_BRL = fetch_ncn()
+    BTC_BRL = fetch_btc()
+    ETH_BRL = fetch_eth()
+except Exception as e:
+    NCN_BRL = 0.05
+    BTC_BRL = 0.30e6
+    ETH_BRL = 0.01e6
+    print(type(e).__name__ + str(e))
+    input("Continue?")
 
 def profit_percent(IN, OUT):
     return 100 * (OUT-IN) / IN
@@ -336,7 +317,7 @@ class NucoinWallet:
             ret += f'{k}: {self.available[k]} = {brl_equivalece}\n'
         ret += 48*"-" + '\n'
         TOTAL_FROZEN = self.frozen.convert_to("BRL")
-        ret += f'In total you have liquid {TOTAL_LIQUID} and {TOTAL_FROZEN} frozen.\n'
+        ret += f'In total you have liquid {TOTAL_LIQUID} and {TOTAL_FROZEN} frozen ({TOTAL_LIQUID + TOTAL_FROZEN}).\n'
         ret += 48*"-" + '\n'
         TOTAL_UNREALIZED_PROFIT = Monetary(0,'BRL')
         TOTAL_REALIZED_PROFIT = Monetary(0,'BRL')
@@ -365,8 +346,6 @@ class NucoinWallet:
         ret += 48*"-" + '\n'
         WALLET_WORTH = TOTAL_LIQUID + self.frozen.convert_to("BRL")
         ret += f'WALLET WORTH: {WALLET_WORTH} (Liquid + Frozen)\n'
-        TOTAL_EARNED = TOTAL_LIQUID + TOTAL_REALIZED_PROFIT
-        ret += f'TOTAL EARNED: {TOTAL_EARNED} (liquid + realzd profit)\n'
         ret += 48*"-" + '\n'
         return ret
 
